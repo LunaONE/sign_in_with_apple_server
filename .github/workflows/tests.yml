@@ -1,0 +1,31 @@
+name: Dart CI
+
+on:
+  push:
+    branches: 
+        - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./packages/sign_in_with_apple_server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - name: Test
+        env:
+          SERVICE_ID: "de.lunaone.sign-in-with-apple-example-service"
+          BUNDLE_IDENTIFIER: "de.lunaone.sign-in-with-apple-example"
+          REDIRECT_URI: "https://sign-in-with-apple.lunaone.de/hooks/apple-return-url"
+          TEAM_ID: "8Q6UTKYN59"
+          KEY_ID: "99N37B29CF"
+          KEY_CONTENT: ${{ secrets.KEY_CONTENT }}
+        run: dart test

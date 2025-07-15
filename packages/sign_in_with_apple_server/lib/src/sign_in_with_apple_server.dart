@@ -2,13 +2,18 @@ import 'dart:convert';
 
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:http/http.dart' as http;
+import 'package:meta/meta.dart';
 
 class SignInWithApple {
   SignInWithApple({
     required SignInWithAppleConfiguration config,
-  }) : _config = config;
+    @visibleForTesting KeySource? keySource,
+  })  : _config = config,
+        _keySource = keySource;
 
   final SignInWithAppleConfiguration _config;
+
+  final KeySource? _keySource;
 
   // https://developer.apple.com/documentation/signinwithapple/verifying-a-user#Verify-the-identity-token
   Future<IdentityToken> verifyIdentityToken(
@@ -177,11 +182,14 @@ class SignInWithApple {
   }
 
   Future<JWTKey> _getKey(String keyId) async {
-    final response = await http.get(
-      Uri.parse('https://appleid.apple.com/auth/keys'),
-    );
+    final keyJson = _keySource != null
+        ? await _keySource()
+        : (await http.get(
+            Uri.parse('https://appleid.apple.com/auth/keys'),
+          ))
+            .body;
 
-    final keys = (jsonDecode(response.body) as Map)["keys"] as List;
+    final keys = (jsonDecode(keyJson) as Map)["keys"] as List;
 
     for (final keyMap in keys) {
       if (keyMap['kid'] == keyId) {
@@ -407,3 +415,5 @@ final class AppleServerNotificationAccountDelete
 
   final String userIdentifier;
 }
+
+typedef KeySource = Future<String> Function();
