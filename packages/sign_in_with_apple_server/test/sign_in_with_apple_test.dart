@@ -17,7 +17,7 @@ void main() {
             File(Platform.environment['KEY_FILE_PATH']!).readAsStringSync(),
       ),
     ),
-    keySource: () =>
+    keySource: () async =>
         File('./test/apple_auth_keys_2025-07-13.json').readAsString(),
   );
 

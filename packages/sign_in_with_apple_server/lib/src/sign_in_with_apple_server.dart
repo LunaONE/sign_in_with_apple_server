@@ -70,11 +70,11 @@ class SignInWithApple {
     return IdentityToken(
       userId: payload['sub'] as String,
       email: payload['email'] as String?,
-      emailVerified: (payload['email_verified'] as bool?) == true,
-      isPrivateEmail: (payload['is_private_email'] as bool?) == true,
-      realUserStatus: (payload['real_user_status'] as int?),
+      emailVerified: payload['email_verified'] as bool? ?? false,
+      isPrivateEmail: payload['is_private_email'] as bool? ?? false,
+      realUserStatus: payload['real_user_status'] as int?,
       nonce: payloadNonce,
-      nonceSupported: (payload['nonce_supported'] as bool?) == true,
+      nonceSupported: payload['nonce_supported'] as bool? ?? false,
     );
   }
 
@@ -189,7 +189,8 @@ class SignInWithApple {
           ))
             .body;
 
-    final keys = (jsonDecode(keyJson) as Map)["keys"] as List;
+    final keys = ((jsonDecode(keyJson) as Map)['keys'] as List)
+        .cast<Map<String, dynamic>>();
 
     for (final keyMap in keys) {
       if (keyMap['kid'] == keyId) {
@@ -202,19 +203,20 @@ class SignInWithApple {
 
   String _createClientSecret() {
     return JWT(
-        {
-          'exp': (DateTime.now()
-                      .add(Duration(minutes: 10))
-                      .millisecondsSinceEpoch /
-                  1000)
-              .floor(),
-        },
-        subject: _config.bundleIdentifier,
-        audience: Audience.one("https://appleid.apple.com"),
-        issuer: _config.teamId,
-        header: {
-          'kid': _config.keyId,
-        }).sign(
+      {
+        'exp': (DateTime.now()
+                    .add(const Duration(minutes: 10))
+                    .millisecondsSinceEpoch /
+                1000)
+            .floor(),
+      },
+      subject: _config.bundleIdentifier,
+      audience: Audience.one('https://appleid.apple.com'),
+      issuer: _config.teamId,
+      header: {
+        'kid': _config.keyId,
+      },
+    ).sign(
       _config.key,
       algorithm: JWTAlgorithm.ES256,
     );
@@ -238,7 +240,8 @@ class SignInWithApple {
     // For example payloads see https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts
     final payload = jwt.payload as Map<String, dynamic>;
 
-    final events = jsonDecode(payload['events']) as Map<String, dynamic>;
+    final events =
+        jsonDecode(payload['events'] as String) as Map<String, dynamic>;
 
     final type = events['type'] as String;
     final userIdentifier = events['sub'] as String;
