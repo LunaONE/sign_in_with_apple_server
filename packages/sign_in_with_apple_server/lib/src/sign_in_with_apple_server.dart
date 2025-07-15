@@ -67,7 +67,7 @@ class SignInWithApple {
       email: payload['email'] as String?,
       emailVerified: (payload['email_verified'] as bool?) == true,
       isPrivateEmail: (payload['is_private_email'] as bool?) == true,
-      realUserStatus: payload['real_user_status'] as int,
+      realUserStatus: (payload['real_user_status'] as int?),
       nonce: payloadNonce,
       nonceSupported: (payload['nonce_supported'] as bool?) == true,
     );
@@ -94,6 +94,12 @@ class SignInWithApple {
         'redirect_uri': _config.redirectUri,
       },
     );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Could not exchange authorization code. Status code: ${response.statusCode}, message: ${response.body}',
+      );
+    }
 
     // Example response:
     // {
@@ -177,8 +183,6 @@ class SignInWithApple {
 
     final keys = (jsonDecode(response.body) as Map)["keys"] as List;
 
-    print(keys);
-
     for (final keyMap in keys) {
       if (keyMap['kid'] == keyId) {
         return JWTKey.fromJWK(keyMap);
@@ -207,8 +211,60 @@ class SignInWithApple {
       algorithm: JWTAlgorithm.ES256,
     );
   }
+
+  Future<AppleServerNotification> decodeAppleServerNotification(
+    /// The received payload token (not the entire body).
+    String payloadToken,
+  ) async {
+    final key = await _getKey(_readKeyId(payloadToken));
+
+    // https://developer.apple.com/documentation/signinwithapple/authenticating-users-with-sign-in-with-apple#Retrieve-the-users-information-from-Apple-ID-servers
+    final jwt = JWT.verify(
+      payloadToken,
+      key,
+      checkHeaderType: false,
+      audience: Audience.one(_config.bundleIdentifier),
+      issuer: 'https://appleid.apple.com',
+    );
+
+    // For example payloads see https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts
+    final payload = jwt.payload as Map<String, dynamic>;
+
+    final events = jsonDecode(payload['events']) as Map<String, dynamic>;
+
+    final type = events['type'] as String;
+    final userIdentifier = events['sub'] as String;
+
+    switch (type) {
+      case 'email-disabled':
+        return AppleServerNotificationEmailDisabled(
+          userIdentifier: userIdentifier,
+          email: events['email'] as String,
+        );
+
+      case 'email-enabled':
+        return AppleServerNotificationEmailEnabled(
+          userIdentifier: userIdentifier,
+          email: events['email'] as String,
+        );
+
+      case 'consent-revoked':
+        return AppleServerNotificationConsentRevoked(
+          userIdentifier: userIdentifier,
+        );
+
+      case 'account-delete':
+        return AppleServerNotificationAccountDelete(
+          userIdentifier: userIdentifier,
+        );
+
+      default:
+        throw Exception('Unexpected notification type: "$type".');
+    }
+  }
 }
 
+/// Email details and real user status are only passed on the initial login.
 class IdentityToken {
   IdentityToken({
     required this.userId,
@@ -231,7 +287,7 @@ class IdentityToken {
   /// 0 = Unsupported
   /// 1 = Unknown
   /// 2 = LikelyReal
-  final int realUserStatus;
+  final int? realUserStatus;
 
   final String? nonce;
 
@@ -306,4 +362,48 @@ class RefreshTokenValidationResponse {
   String toString() {
     return 'RefreshTokenValidationResponse(accessToken: $accessToken, accessTokenExpiresIn: $accessTokenExpiresIn, idToken: $idToken)';
   }
+}
+
+sealed class AppleServerNotification {}
+
+final class AppleServerNotificationEmailDisabled
+    implements AppleServerNotification {
+  AppleServerNotificationEmailDisabled({
+    required this.userIdentifier,
+    required this.email,
+  });
+
+  final String userIdentifier;
+
+  final String email;
+}
+
+final class AppleServerNotificationEmailEnabled
+    implements AppleServerNotification {
+  AppleServerNotificationEmailEnabled({
+    required this.userIdentifier,
+    required this.email,
+  });
+
+  final String userIdentifier;
+
+  final String email;
+}
+
+final class AppleServerNotificationConsentRevoked
+    implements AppleServerNotification {
+  AppleServerNotificationConsentRevoked({
+    required this.userIdentifier,
+  });
+
+  final String userIdentifier;
+}
+
+final class AppleServerNotificationAccountDelete
+    implements AppleServerNotification {
+  AppleServerNotificationAccountDelete({
+    required this.userIdentifier,
+  });
+
+  final String userIdentifier;
 }
