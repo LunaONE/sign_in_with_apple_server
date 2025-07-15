@@ -12,7 +12,11 @@ concurrency:
 
 jobs:
   test:
+    name: Test on Dart ${{ matrix.sdk }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sdk: [3.5.0, stable]
     defaults:
       run:
         working-directory: ./packages/sign_in_with_apple_server
@@ -20,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: 3.6.1
+          sdk: ${{ matrix.sdk }}
       - run: dart pub get
       - run: dart format --set-exit-if-changed .
       - run: dart analyze
