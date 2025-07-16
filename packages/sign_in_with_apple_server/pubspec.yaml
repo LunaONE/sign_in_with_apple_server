@@ -1,6 +1,6 @@
 name: sign_in_with_apple_server
 description: Server-side utilities for Sign in with Apple.
-version: 0.2.0
+version: 0.3.0
 repository: https://github.com/LunaONE/sign_in_with_apple_server
 
 environment:
