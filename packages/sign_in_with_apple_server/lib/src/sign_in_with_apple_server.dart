@@ -87,13 +87,20 @@ class SignInWithApple {
     /// Per Apple's docs
     /// The authorization code received in an authorization response sent to your app.
     /// The code is single-use only and valid for five minutes. Authorization code validation requests require this parameter.
-    String authorizationCode,
-  ) async {
+    String authorizationCode, {
+    /// For "native" logins on Apple platforms done through a deployed app, the bundle identifier must be used,
+    /// while web and third-party platform sign-ins use the service ID.
+    required bool useBundleIdentifier,
+  }) async {
     final response = await http.post(
       Uri.https('appleid.apple.com', '/auth/token'),
       body: {
-        'client_id': _config.bundleIdentifier,
-        'client_secret': _createClientSecret(),
+        'client_id': useBundleIdentifier
+            ? _config.bundleIdentifier
+            : _config.serviceIdentifier,
+        'client_secret': _createClientSecret(
+          useBundleIdentifier: useBundleIdentifier,
+        ),
         'code': authorizationCode,
         'grant_type': 'authorization_code',
         'redirect_uri': _config.redirectUri,
@@ -134,7 +141,7 @@ class SignInWithApple {
       Uri.https('appleid.apple.com', '/auth/token'),
       body: {
         'client_id': _config.bundleIdentifier,
-        'client_secret': _createClientSecret(),
+        'client_secret': _createClientSecret(useBundleIdentifier: true),
         'grant_type': 'refresh_token',
         'refresh_token': refreshToken,
       },
@@ -164,7 +171,7 @@ class SignInWithApple {
       Uri.https('appleid.apple.com', '/auth/revoke'),
       body: {
         'client_id': _config.bundleIdentifier,
-        'client_secret': _createClientSecret(),
+        'client_secret': _createClientSecret(useBundleIdentifier: true),
         'token': refreshToken,
         'token_type_hint': 'refresh_token',
       },
@@ -201,7 +208,9 @@ class SignInWithApple {
     throw Exception('Did not find key "$keyId"');
   }
 
-  String _createClientSecret() {
+  String _createClientSecret({
+    required bool useBundleIdentifier,
+  }) {
     return JWT(
       {
         'exp': (DateTime.now()
@@ -210,7 +219,9 @@ class SignInWithApple {
                 1000)
             .floor(),
       },
-      subject: _config.bundleIdentifier,
+      subject: useBundleIdentifier
+          ? _config.bundleIdentifier
+          : _config.serviceIdentifier,
       audience: Audience.one('https://appleid.apple.com'),
       issuer: _config.teamId,
       header: {

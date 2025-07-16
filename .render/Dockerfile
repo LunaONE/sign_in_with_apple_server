@@ -12,7 +12,9 @@ RUN dart compile exe sign_in_with_apple_server_relic_example.dart -o server
 FROM scratch
 COPY --from=build /runtime/ /
 COPY --from=build /app/packages/sign_in_with_apple_server_relic/example/server /app/bin/
+COPY --from=build /app/packages/sign_in_with_apple_server_relic/example/assets /app/bin/assets/
 
 # Start server.
 EXPOSE 10000
+WORKDIR /app/bin/
 CMD ["/app/bin/server"]

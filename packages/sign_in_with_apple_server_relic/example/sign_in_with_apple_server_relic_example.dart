@@ -7,6 +7,8 @@ import 'package:sign_in_with_apple_server/sign_in_with_apple_server.dart';
 
 late final SignInWithApple siwa;
 
+late final String androidAppPackage;
+
 final activityLogEntries = <ActivityLogEntry>[];
 
 final refreshTokensByUserIdentifier = <String, String>{};
@@ -24,14 +26,18 @@ Future<void> main() async {
       ),
     ),
   );
+  // You might need to configure similar links for other platforms, or use a more flexible set up with targets.
+  androidAppPackage = Platform.environment['ANDROID_APP_PACKAGE']!;
 
   // Setup router
   final router = Router<Handler>()
     ..post('/hooks/apple-server-to-server', serverHook)
-    ..get('/hooks/apple-return-url', redirectUrl)
+    ..post('/hooks/apple-return-url', redirectUrl)
     // Example user-facing endpoints
     ..post('/api/sign-in', signIn)
     ..post('/api/revoke', revoke)
+    // SiwA web-page login
+    ..get('/web-signin', siwaWeb)
     // Debug activity log
     ..get('/activity-log', activityLog)
     // Health check path for render.com
@@ -40,20 +46,7 @@ Future<void> main() async {
   final handler = const Pipeline()
       .addMiddleware(logRequests())
       .addMiddleware(routeWith(router))
-      .addHandler(
-        respondWith(
-          (final _) => Response.ok(
-            body: Body.fromString(
-              'Test server for <a href="https://pub.dev/packages/sign_in_with_apple_server">sign_in_with_apple_server</a>.'
-              '<br /><br />'
-              'View the debug activity log <a href="/activity-log">here</a>.'
-              '<br /><br />'
-              'By <a href="https://www.lunaone.de/flutter">LunaONE GmbH</a>.',
-              mimeType: MimeType.html,
-            ),
-          ),
-        ),
-      );
+      .addHandler(landingPage);
 
   // Start the server with the handler
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
@@ -85,10 +78,67 @@ Future<ResponseContext> serverHook(final RequestContext ctx) async {
   return (ctx as RespondableContext).withResponse(Response.ok());
 }
 
-ResponseContext redirectUrl(final RequestContext ctx) {
-  print(ctx.request.body);
+Future<ResponseContext> redirectUrl(final RequestContext ctx) async {
+  final body = await utf8.decodeStream(ctx.request.body.read());
 
-  return (ctx as RespondableContext).withResponse(Response.ok());
+  activityLogEntries.add(
+    ActivityLogEntry(
+      endpoint: '${ctx.request.method.value} ${ctx.request.requestedUri.path}',
+      data: {
+        'query': ctx.request.requestedUri.query,
+        'body': body,
+      },
+    ),
+  );
+
+  final formData = Uri(query: body).queryParameters;
+
+  final authorizationCode = formData['code']!;
+  final identityToken = formData['id_token']!;
+
+  final userAgent = ctx.request.headers.userAgent;
+  // Alternatively use the `state` to detect target action (so this would not be triggered in browsers on Android)
+  if (userAgent != null && userAgent.contains('Android')) {
+    // Important to always forward, even on error (contained in the `body` parameters), so the in-app browser closes in the app
+    final appDeeplink = Uri(
+      scheme: 'intent',
+      host: 'callback',
+      query: body,
+      fragment:
+          'Intent;package=${androidAppPackage};scheme=signinwithapple;end',
+    );
+
+    print(appDeeplink);
+
+    return (ctx as RespondableContext).withResponse(
+      Response.found(appDeeplink),
+    );
+  }
+
+  /// Check that the incoming link is valid
+  final verifiedIdentityToken = await siwa.verifyIdentityToken(
+    identityToken,
+    useBundleIdentifier: false,
+    nonce: null,
+  );
+
+  print('verifiedIdentityToken: $verifiedIdentityToken');
+
+  final refreshToken = await siwa.exchangeAuthorizationCode(
+    authorizationCode,
+    useBundleIdentifier: false,
+  );
+
+  print('refreshToken: $refreshToken');
+
+  refreshTokensByUserIdentifier[verifiedIdentityToken.userId] =
+      refreshToken.refreshToken;
+
+  return (ctx as RespondableContext).withResponse(
+    Response.ok(
+      body: Body.fromString('$verifiedIdentityToken'),
+    ),
+  );
 }
 
 Future<ResponseContext> signIn(final RequestContext ctx) async {
@@ -135,6 +185,7 @@ Future<ResponseContext> signIn(final RequestContext ctx) async {
 
     final refreshToken = await siwa.exchangeAuthorizationCode(
       authorizationCode,
+      useBundleIdentifier: useBundleIdentifier,
     );
 
     print('refreshToken: $refreshToken');
@@ -177,6 +228,32 @@ ResponseContext activityLog(final RequestContext ctx) {
 
 ResponseContext healthCheck(final RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(Response.ok());
+}
+
+ResponseContext landingPage(final RequestContext ctx) {
+  return (ctx as RespondableContext).withResponse(
+    Response.ok(
+      body: Body.fromString(
+        File('./assets/index.html').readAsStringSync(),
+        mimeType: MimeType.html,
+      ),
+    ),
+  );
+}
+
+ResponseContext siwaWeb(final RequestContext ctx) {
+  return (ctx as RespondableContext).withResponse(
+    Response.ok(
+      body: Body.fromString(
+        File('./assets/siwa_web.html')
+            .readAsStringSync()
+            .replaceFirst('[CLIENT_ID]', Platform.environment['SERVICE_ID']!)
+            .replaceFirst(
+                '[REDIRECT_URI]', Platform.environment['REDIRECT_URI']!),
+        mimeType: MimeType.html,
+      ),
+    ),
+  );
 }
 
 class ActivityLogEntry {
