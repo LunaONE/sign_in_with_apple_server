@@ -134,18 +134,42 @@ class SignInWithApple {
   /// Uses the refresh token to get the latest state of the authorization.
   ///
   /// If it is in good standing, this will return the identity token and an access token.
+  ///
+  /// Throws a `RevokedTokenException` in case the token is not valid anymore.
   Future<RefreshTokenValidationResponse> validateRefreshToken(
-    String refreshToken,
-  ) async {
+    String refreshToken, {
+    /// For "native" logins on Apple platforms done through a deployed app, the bundle identifier must be used,
+    /// while web and third-party platform sign-ins use the service ID.
+    required bool useBundleIdentifier,
+  }) async {
     final response = await http.post(
       Uri.https('appleid.apple.com', '/auth/token'),
       body: {
-        'client_id': _config.bundleIdentifier,
-        'client_secret': _createClientSecret(useBundleIdentifier: true),
+        'client_id': useBundleIdentifier
+            ? _config.bundleIdentifier
+            : _config.serviceIdentifier,
+        'client_secret': _createClientSecret(
+          useBundleIdentifier: useBundleIdentifier,
+        ),
         'grant_type': 'refresh_token',
         'refresh_token': refreshToken,
       },
     );
+
+    if (response.statusCode == 400) {
+      final json = jsonDecode(response.body);
+
+      //  {"error":"invalid_grant","error_description":"The token has expired or has been revoked."}
+      if (json is Map && json['error'] == 'invalid_grant') {
+        throw RevokedTokenException();
+      }
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to validate refresh token. ${response.statusCode} / ${response.body}',
+      );
+    }
 
     // Example response:
     // {
@@ -164,21 +188,35 @@ class SignInWithApple {
   }
 
   /// Revokes the authorization for the user.
+  ///
+  /// If the authorization has already been revoked or the refresh token does not belong to the specified bundle/service ID,
+  /// then the underlying API silently succeeds (status 200), without actually revoking the authorization.
+  /// To be certain that the operation succeeded, call [validateRefreshToken] and check for an `RevokedTokenException`.
   Future<void> revokeAuthorization({
     required String refreshToken,
+
+    /// For "native" logins on Apple platforms done through a deployed app, the bundle identifier must be used,
+    /// while web and third-party platform sign-ins use the service ID.
+    required bool useBundleIdentifier,
   }) async {
     final response = await http.post(
       Uri.https('appleid.apple.com', '/auth/revoke'),
       body: {
-        'client_id': _config.bundleIdentifier,
-        'client_secret': _createClientSecret(useBundleIdentifier: true),
+        'client_id': useBundleIdentifier
+            ? _config.bundleIdentifier
+            : _config.serviceIdentifier,
+        'client_secret': _createClientSecret(
+          useBundleIdentifier: useBundleIdentifier,
+        ),
         'token': refreshToken,
         'token_type_hint': 'refresh_token',
       },
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Failed to revoke authorization. ${response.body}');
+      throw Exception(
+        'Failed to revoke authorization. ${response.statusCode} / ${response.body}',
+      );
     }
   }
 
@@ -431,3 +469,5 @@ final class AppleServerNotificationAccountDelete
 }
 
 typedef KeySource = Future<String> Function();
+
+class RevokedTokenException implements Exception {}

@@ -11,7 +11,8 @@ late final String androidAppPackage;
 
 final activityLogEntries = <ActivityLogEntry>[];
 
-final refreshTokensByUserIdentifier = <String, String>{};
+final refreshTokensByUserIdentifier =
+    <String, ({String refreshToken, bool useBundleIdentifier})>{};
 
 Future<void> main() async {
   siwa = SignInWithApple(
@@ -38,8 +39,11 @@ Future<void> main() async {
     ..post('/api/revoke', revoke)
     // SiwA web-page login
     ..get('/web-signin', siwaWeb)
-    // Debug activity log
-    ..get('/activity-log', activityLog)
+    // Group of admin handlers, which a normal server would not expose
+    ..get('/admin/activity-log', activityLog)
+    ..get('/admin/sessions', sessions)
+    ..post('/admin/refresh-token', refreshToken)
+    ..post('/admin/revoke', revokeAuthorization)
     // Health check path for render.com
     ..get('/healthz', healthCheck);
 
@@ -104,8 +108,7 @@ Future<ResponseContext> redirectUrl(final RequestContext ctx) async {
       scheme: 'intent',
       host: 'callback',
       query: body,
-      fragment:
-          'Intent;package=${androidAppPackage};scheme=signinwithapple;end',
+      fragment: 'Intent;package=$androidAppPackage;scheme=signinwithapple;end',
     );
 
     print(appDeeplink);
@@ -131,8 +134,10 @@ Future<ResponseContext> redirectUrl(final RequestContext ctx) async {
 
   print('refreshToken: $refreshToken');
 
-  refreshTokensByUserIdentifier[verifiedIdentityToken.userId] =
-      refreshToken.refreshToken;
+  refreshTokensByUserIdentifier[verifiedIdentityToken.userId] = (
+    refreshToken: refreshToken.refreshToken,
+    useBundleIdentifier: false,
+  );
 
   return (ctx as RespondableContext).withResponse(
     Response.ok(
@@ -190,8 +195,10 @@ Future<ResponseContext> signIn(final RequestContext ctx) async {
 
     print('refreshToken: $refreshToken');
 
-    refreshTokensByUserIdentifier[verifiedIdentityToken.userId] =
-        refreshToken.refreshToken;
+    refreshTokensByUserIdentifier[verifiedIdentityToken.userId] = (
+      refreshToken: refreshToken.refreshToken,
+      useBundleIdentifier: useBundleIdentifier,
+    );
 
     return (ctx as RespondableContext).withResponse(
       Response.ok(
@@ -224,6 +231,121 @@ ResponseContext activityLog(final RequestContext ctx) {
       '',
     ]
   ].join('\n'))));
+}
+
+ResponseContext sessions(final RequestContext ctx) {
+  return (ctx as RespondableContext).withResponse(
+    Response.ok(
+      body: Body.fromString(
+        [
+          '<h1>Active Sessions</h1>',
+          '<ul>',
+          for (final entry in refreshTokensByUserIdentifier.entries) ...[
+            '<li>'
+                '${entry.key}'
+                '<form action="/admin/refresh-token" method="post">'
+                '  <input type="hidden" name="userId" value="${entry.key}">'
+                '  <input type="submit" value="Refresh token" />'
+                '</form>'
+                '<form action="/admin/revoke" method="post">'
+                '  <input type="hidden" name="userId" value="${entry.key}">'
+                '  <input type="submit" value="Revoke authorization" />'
+                '</form>'
+                '</li>'
+          ],
+          '</ul>'
+        ].join('\n'),
+        mimeType: MimeType.html,
+      ),
+    ),
+  );
+}
+
+Future<ResponseContext> refreshToken(final RequestContext ctx) async {
+  try {
+    final body = await utf8.decodeStream(ctx.request.body.read());
+
+    activityLogEntries.add(
+      ActivityLogEntry(
+        endpoint:
+            '${ctx.request.method.value} ${ctx.request.requestedUri.path}',
+        data: {
+          'query': ctx.request.requestedUri.query,
+          'body': body,
+        },
+      ),
+    );
+
+    final formData = Uri(query: body).queryParameters;
+    final userId = formData['userId']!;
+
+    print(userId);
+    print(refreshTokensByUserIdentifier);
+
+    final refreshToken = await siwa.validateRefreshToken(
+      refreshTokensByUserIdentifier[userId]!.refreshToken,
+      useBundleIdentifier:
+          refreshTokensByUserIdentifier[userId]!.useBundleIdentifier,
+    );
+
+    final verifiedIdentityToken = await siwa.verifyIdentityToken(
+      refreshToken.idToken,
+      useBundleIdentifier: false,
+      nonce: null,
+    );
+
+    return (ctx as RespondableContext).withResponse(Response.ok(
+        body: Body.fromString(
+      'Refreshed token\n'
+      ''
+      '$verifiedIdentityToken',
+    )));
+  } catch (e, stackTrace) {
+    print(e);
+    print(stackTrace);
+
+    rethrow;
+  }
+}
+
+Future<ResponseContext> revokeAuthorization(final RequestContext ctx) async {
+  try {
+    final body = await utf8.decodeStream(ctx.request.body.read());
+
+    activityLogEntries.add(
+      ActivityLogEntry(
+        endpoint:
+            '${ctx.request.method.value} ${ctx.request.requestedUri.path}',
+        data: {
+          'query': ctx.request.requestedUri.query,
+          'body': body,
+        },
+      ),
+    );
+
+    final formData = Uri(query: body).queryParameters;
+    final userId = formData['userId']!;
+
+    print(userId);
+    print(refreshTokensByUserIdentifier);
+
+    await siwa.revokeAuthorization(
+      refreshToken: refreshTokensByUserIdentifier[userId]!.refreshToken,
+      useBundleIdentifier:
+          refreshTokensByUserIdentifier[userId]!.useBundleIdentifier,
+    );
+
+    refreshTokensByUserIdentifier.remove(userId);
+
+    return (ctx as RespondableContext).withResponse(
+      Response.found(Uri.parse('/admin/sessions')),
+    );
+  } catch (e, stackTrace) {
+    print(e);
+    print(stackTrace);
+
+    rethrow;
+  }
 }
 
 ResponseContext healthCheck(final RequestContext ctx) {
