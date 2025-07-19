@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
+import 'package:sign_in_with_apple_server/sign_in_with_apple_server.dart';
 
 class SignInWithApple {
   SignInWithApple({
@@ -15,6 +16,11 @@ class SignInWithApple {
 
   final KeySource? _keySource;
 
+  /// Verifies the identity token and then extracts the data from it.
+  ///
+  /// Checks that the token is designated for the configured app and signed
+  /// with Apple's private key (by checking against their published public key).
+  ///
   // https://developer.apple.com/documentation/signinwithapple/verifying-a-user#Verify-the-identity-token
   Future<IdentityToken> verifyIdentityToken(
     String identityToken, {
@@ -82,6 +88,9 @@ class SignInWithApple {
   ///
   /// The response also includes an access token (which could be used for revocations),
   /// and a new identity token.
+  ///
+  /// The exchange of the [authorizationCode] must happen within 5 minutes of receiving
+  /// it during the sign-in process.
   // https://developer.apple.com/documentation/signinwithapplerestapi/generate-and-validate-tokens#Validate-the-authorization-grant-code
   Future<AuthorizationCodeExchangeResponse> exchangeAuthorizationCode(
     /// Per Apple's docs
@@ -135,7 +144,7 @@ class SignInWithApple {
   ///
   /// If it is in good standing, this will return the identity token and an access token.
   ///
-  /// Throws a `RevokedTokenException` in case the token is not valid anymore.
+  /// Throws a [RevokedTokenException] in case the token is not valid anymore.
   Future<RefreshTokenValidationResponse> validateRefreshToken(
     String refreshToken, {
     /// For "native" logins on Apple platforms done through a deployed app, the bundle identifier must be used,
@@ -191,7 +200,7 @@ class SignInWithApple {
   ///
   /// If the authorization has already been revoked or the refresh token does not belong to the specified bundle/service ID,
   /// then the underlying API silently succeeds (status 200), without actually revoking the authorization.
-  /// To be certain that the operation succeeded, call [validateRefreshToken] and check for an `RevokedTokenException`.
+  /// To be certain that the operation succeeded, call [validateRefreshToken] and check for a [RevokedTokenException].
   Future<void> revokeAuthorization({
     required String refreshToken,
 
@@ -220,59 +229,11 @@ class SignInWithApple {
     }
   }
 
-  String _readKeyId(String jwtToken) {
-    final jwt = JWT.decode(jwtToken);
-
-    return jwt.header!['kid'] as String;
-  }
-
-  Future<JWTKey> _getKey(String keyId) async {
-    final keyJson = _keySource != null
-        ? await _keySource()
-        : (await http.get(
-            Uri.parse('https://appleid.apple.com/auth/keys'),
-          ))
-            .body;
-
-    final keys = ((jsonDecode(keyJson) as Map)['keys'] as List)
-        .cast<Map<String, dynamic>>();
-
-    for (final keyMap in keys) {
-      if (keyMap['kid'] == keyId) {
-        return JWTKey.fromJWK(keyMap);
-      }
-    }
-
-    throw Exception('Did not find key "$keyId"');
-  }
-
-  String _createClientSecret({
-    required bool useBundleIdentifier,
-  }) {
-    return JWT(
-      {
-        'exp': (DateTime.now()
-                    .add(const Duration(minutes: 10))
-                    .millisecondsSinceEpoch /
-                1000)
-            .floor(),
-      },
-      subject: useBundleIdentifier
-          ? _config.bundleIdentifier
-          : _config.serviceIdentifier,
-      audience: Audience.one('https://appleid.apple.com'),
-      issuer: _config.teamId,
-      header: {
-        'kid': _config.keyId,
-      },
-    ).sign(
-      _config.key,
-      algorithm: JWTAlgorithm.ES256,
-    );
-  }
-
+  /// Decodes an incoming Apple server-to-server notification payload.
+  ///
+  /// This should be used for a web-hook receiving account status changes from Apple.
   Future<AppleServerNotification> decodeAppleServerNotification(
-    /// The received payload token (not the entire body).
+    /// The received payload token String (not the entire body).
     String payloadToken,
   ) async {
     final key = await _getKey(_readKeyId(payloadToken));
@@ -322,152 +283,58 @@ class SignInWithApple {
         throw Exception('Unexpected notification type: "$type".');
     }
   }
-}
 
-/// Email details and real user status are only passed on the initial login.
-class IdentityToken {
-  IdentityToken({
-    required this.userId,
-    required this.email,
-    required this.emailVerified,
-    required this.isPrivateEmail,
-    required this.realUserStatus,
-    required this.nonce,
-    required this.nonceSupported,
-  });
+  String _readKeyId(String jwtToken) {
+    final jwt = JWT.decode(jwtToken);
 
-  final String userId;
+    return jwt.header!['kid'] as String;
+  }
 
-  final String? email;
+  Future<JWTKey> _getKey(String keyId) async {
+    final keyJson = _keySource != null
+        ? await _keySource()
+        : (await http.get(
+            Uri.parse('https://appleid.apple.com/auth/keys'),
+          ))
+            .body;
 
-  final bool? emailVerified;
+    final keys = ((jsonDecode(keyJson) as Map)['keys'] as List)
+        .cast<Map<String, dynamic>>();
 
-  final bool? isPrivateEmail;
+    for (final keyMap in keys) {
+      if (keyMap['kid'] == keyId) {
+        return JWTKey.fromJWK(keyMap);
+      }
+    }
 
-  /// 0 = Unsupported
-  /// 1 = Unknown
-  /// 2 = LikelyReal
-  final int? realUserStatus;
+    throw Exception('Did not find key "$keyId"');
+  }
 
-  final String? nonce;
-
-  final bool? nonceSupported;
-
-  @override
-  String toString() {
-    return 'IdentityToken(userId: $userId, email: $email, emailVerified: $emailVerified, isPrivateEmail: $isPrivateEmail, realUserStatus: $realUserStatus, nonce: $nonce, nonceSupported: $nonceSupported)';
+  String _createClientSecret({
+    required bool useBundleIdentifier,
+  }) {
+    return JWT(
+      {
+        'exp': (DateTime.now()
+                    .add(const Duration(minutes: 10))
+                    .millisecondsSinceEpoch /
+                1000)
+            .floor(),
+      },
+      subject: useBundleIdentifier
+          ? _config.bundleIdentifier
+          : _config.serviceIdentifier,
+      audience: Audience.one('https://appleid.apple.com'),
+      issuer: _config.teamId,
+      header: {
+        'kid': _config.keyId,
+      },
+    ).sign(
+      ECPrivateKey(_config.key),
+      algorithm: JWTAlgorithm.ES256,
+    );
   }
 }
 
-class SignInWithAppleConfiguration {
-  SignInWithAppleConfiguration({
-    required this.serviceIdentifier,
-    required this.bundleIdentifier,
-    required this.redirectUri,
-    required this.teamId,
-    required this.keyId,
-    required this.key,
-  });
-
-  final String bundleIdentifier;
-
-  final String serviceIdentifier;
-
-  final String redirectUri;
-
-  final String teamId;
-
-  /// ID of the service key
-  final String keyId;
-
-  final ECPrivateKey key;
-}
-
-class AuthorizationCodeExchangeResponse {
-  AuthorizationCodeExchangeResponse({
-    required this.accessToken,
-    required this.accessTokenExpiresIn,
-    required this.idToken,
-    required this.refreshToken,
-  });
-
-  final String accessToken;
-
-  final int accessTokenExpiresIn;
-
-  final String idToken;
-
-  final String refreshToken;
-
-  @override
-  String toString() {
-    return 'AuthorizationCodeExchangeResponse(accessToken: $accessToken, accessTokenExpiresIn: $accessTokenExpiresIn, idToken: $idToken, refreshToken: $refreshToken)';
-  }
-}
-
-class RefreshTokenValidationResponse {
-  RefreshTokenValidationResponse({
-    required this.accessToken,
-    required this.accessTokenExpiresIn,
-    required this.idToken,
-  });
-
-  final String accessToken;
-
-  final int accessTokenExpiresIn;
-
-  final String idToken;
-
-  @override
-  String toString() {
-    return 'RefreshTokenValidationResponse(accessToken: $accessToken, accessTokenExpiresIn: $accessTokenExpiresIn, idToken: $idToken)';
-  }
-}
-
-sealed class AppleServerNotification {}
-
-final class AppleServerNotificationEmailDisabled
-    implements AppleServerNotification {
-  AppleServerNotificationEmailDisabled({
-    required this.userIdentifier,
-    required this.email,
-  });
-
-  final String userIdentifier;
-
-  final String email;
-}
-
-final class AppleServerNotificationEmailEnabled
-    implements AppleServerNotification {
-  AppleServerNotificationEmailEnabled({
-    required this.userIdentifier,
-    required this.email,
-  });
-
-  final String userIdentifier;
-
-  final String email;
-}
-
-final class AppleServerNotificationConsentRevoked
-    implements AppleServerNotification {
-  AppleServerNotificationConsentRevoked({
-    required this.userIdentifier,
-  });
-
-  final String userIdentifier;
-}
-
-final class AppleServerNotificationAccountDelete
-    implements AppleServerNotification {
-  AppleServerNotificationAccountDelete({
-    required this.userIdentifier,
-  });
-
-  final String userIdentifier;
-}
-
+@visibleForTesting
 typedef KeySource = Future<String> Function();
-
-class RevokedTokenException implements Exception {}

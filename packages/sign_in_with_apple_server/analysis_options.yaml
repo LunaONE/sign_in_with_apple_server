@@ -9,6 +9,9 @@ analyzer:
   errors:
     do_not_use_environment: warning
 
+  exclude:
+    - example/**
+
 linter:
   rules:
     - always_declare_return_types

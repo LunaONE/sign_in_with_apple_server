@@ -22,9 +22,7 @@ Future<void> main() async {
       redirectUri: Platform.environment['REDIRECT_URI']!,
       teamId: Platform.environment['TEAM_ID']!,
       keyId: Platform.environment['KEY_ID']!,
-      key: ECPrivateKey(
-        File(Platform.environment['KEY_FILE_PATH']!).readAsStringSync(),
-      ),
+      key: File(Platform.environment['KEY_FILE_PATH']!).readAsStringSync(),
     ),
   );
   // You might need to configure similar links for other platforms, or use a more flexible set up with targets.
