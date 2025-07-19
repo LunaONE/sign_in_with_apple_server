@@ -1,0 +1,1 @@
+class RevokedTokenException implements Exception {}

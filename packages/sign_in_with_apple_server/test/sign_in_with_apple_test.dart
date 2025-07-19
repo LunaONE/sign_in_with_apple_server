@@ -12,10 +12,8 @@ void main() {
       redirectUri: Platform.environment['REDIRECT_URI']!,
       teamId: Platform.environment['TEAM_ID']!,
       keyId: Platform.environment['KEY_ID']!,
-      key: ECPrivateKey(
-        Platform.environment['KEY_CONTENT'] ??
-            File(Platform.environment['KEY_FILE_PATH']!).readAsStringSync(),
-      ),
+      key: Platform.environment['KEY_CONTENT'] ??
+          File(Platform.environment['KEY_FILE_PATH']!).readAsStringSync(),
     ),
     keySource: () async =>
         File('./test/apple_auth_keys_2025-07-13.json').readAsString(),
