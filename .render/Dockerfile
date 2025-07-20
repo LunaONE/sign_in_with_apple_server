@@ -5,7 +5,7 @@ COPY . .
 WORKDIR /app/packages/sign_in_with_apple_server_relic/example
 
 RUN dart pub get
-RUN dart compile exe sign_in_with_apple_server_relic_example.dart -o server
+RUN dart compile exe example.dart -o server
 
 # Build minimal serving image from AOT-compiled `/server` and required system
 # libraries and configuration files stored in `/runtime/` from the build stage.
