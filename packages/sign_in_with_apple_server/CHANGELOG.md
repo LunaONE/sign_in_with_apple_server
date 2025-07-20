@@ -1,3 +1,8 @@
+## 1.0.0
+
+- Updated documentation.
+- Take private key as `String` in order to not expose dependency types on the API.
+
 ## 0.3.0
 
 - Support `useBundleIdentifier` in all APIs, to fully support tokens generated on Android and web.

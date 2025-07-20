@@ -1,6 +1,6 @@
 name: sign_in_with_apple_server
-description: Server-side utilities for Sign in with Apple.
-version: 0.3.0
+description: Server-side utilities for implementing Sign in with Apple in a server written in Dart, complementing the client-side sign_in_with_apple package.
+version: 1.0.0
 repository: https://github.com/LunaONE/sign_in_with_apple_server
 
 environment:
