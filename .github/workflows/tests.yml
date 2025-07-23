@@ -12,14 +12,18 @@ concurrency:
 
 jobs:
   test:
-    name: Test on Dart ${{ matrix.sdk }}
+    name: Test ${{ matrix.package }} on Dart ${{ matrix.sdk }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         sdk: [3.5.0, stable]
+        package: [
+          ./packages/sign_in_with_apple_server,
+          ./packages/sign_in_with_apple_server_relic
+        ]
     defaults:
       run:
-        working-directory: ./packages/sign_in_with_apple_server
+        working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
@@ -36,4 +40,13 @@ jobs:
           TEAM_ID: "8Q6UTKYN59"
           KEY_ID: "99N37B29CF"
           KEY_CONTENT: ${{ secrets.KEY_CONTENT }}
-        run: dart test
+        # Ignore packages without tests
+        run: dart test || [ $? -eq 79 ]
+
+  build_docker_image:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f .render/Dockerfile -t siwa-demo-server .

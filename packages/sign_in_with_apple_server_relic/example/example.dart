@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:relic/io_adapter.dart';
 import 'package:relic/relic.dart';
 import 'package:sign_in_with_apple_server/sign_in_with_apple_server.dart';
+import 'package:sign_in_with_apple_server_relic/sign_in_with_apple_server_relic.dart';
 
 late final SignInWithApple siwa;
 
@@ -28,20 +29,33 @@ Future<void> main() async {
   // You might need to configure similar links for other platforms, or use a more flexible set up with targets.
   androidAppPackage = Platform.environment['ANDROID_APP_PACKAGE']!;
 
-  // Setup router
   final router = Router<Handler>()
-    ..post('/hooks/apple-server-to-server', serverHook)
-    ..post('/hooks/apple-return-url', redirectUrl)
-    // Example user-facing endpoints
-    ..post('/api/sign-in', signIn)
+    // These 3 are endpoints that apps commonly implement
+    ..post(
+      '/api/sign-in',
+      signInHandler(siwa, signIn),
+    )
+    ..post(
+      '/hooks/apple-return-url',
+      redirectUrlHandler(redirectUrl),
+    )
+    ..post(
+      '/hooks/apple-server-to-server',
+      serverToServerNotificationHandler(siwa, serverToServerNotification),
+    )
+
+    // Optional endpoint (to showcase using Apple's API with the refresh token on demand)
     ..post('/api/revoke', revoke)
+
     // SiwA web-page login
     ..get('/web-signin', siwaWeb)
+
     // Group of admin handlers, which a normal server would not expose
     ..get('/admin/activity-log', activityLog)
     ..get('/admin/sessions', sessions)
     ..post('/admin/refresh-token', refreshToken)
     ..post('/admin/revoke', revokeAuthorization)
+
     // Health check path for render.com
     ..get('/healthz', healthCheck);
 
@@ -58,7 +72,10 @@ Future<void> main() async {
 }
 
 // https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts
-Future<ResponseContext> serverHook(final RequestContext ctx) async {
+Future<void> serverToServerNotification(
+  RequestContext ctx,
+  AppleServerNotification notification,
+) async {
   final body = await utf8.decodeStream(ctx.request.body.read());
 
   print('body: $body');
@@ -76,13 +93,9 @@ Future<ResponseContext> serverHook(final RequestContext ctx) async {
   final payload = (jsonDecode(body) as Map)['payload'] as String;
 
   print(await siwa.decodeAppleServerNotification(payload));
-
-  return (ctx as RespondableContext).withResponse(Response.ok());
 }
 
-Future<ResponseContext> redirectUrl(final RequestContext ctx) async {
-  final body = await utf8.decodeStream(ctx.request.body.read());
-
+Future<Uri> redirectUrl(RequestContext ctx, String body) async {
   activityLogEntries.add(
     ActivityLogEntry(
       endpoint: '${ctx.request.method.value} ${ctx.request.requestedUri.path}',
@@ -111,9 +124,7 @@ Future<ResponseContext> redirectUrl(final RequestContext ctx) async {
 
     print(appDeeplink);
 
-    return (ctx as RespondableContext).withResponse(
-      Response.found(appDeeplink),
-    );
+    return appDeeplink;
   }
 
   /// Check that the incoming link is valid
@@ -137,27 +148,26 @@ Future<ResponseContext> redirectUrl(final RequestContext ctx) async {
     useBundleIdentifier: false,
   );
 
-  return (ctx as RespondableContext).withResponse(
-    Response.ok(
-      body: Body.fromString('$verifiedIdentityToken'),
-    ),
-  );
+  throw UnimplementedError();
 }
 
-Future<ResponseContext> signIn(final RequestContext ctx) async {
+Future<void> signIn(
+  RequestContext ctx,
+  IdentityToken identityToken,
+  String refreshToken, {
+  required bool useBundleIdentifier,
+
+  /// Set to whatever the user specified (if requested in the scopes).
+  String? firstName,
+
+  /// Set to whatever the user specified (if requested in the scopes).
+  String? lastName,
+}) async {
   final authorizationCode =
       ctx.request.requestedUri.queryParameters['authorizationCode'];
 
-  if (authorizationCode == null) {
-    return ctx.withMissingQueryParameterResponse("authorizationCode");
-  }
-
-  final identityToken =
+  final identityTokenParameter =
       ctx.request.requestedUri.queryParameters['identityToken'];
-
-  if (identityToken == null) {
-    return ctx.withMissingQueryParameterResponse("identityToken");
-  }
 
   final firstName = ctx.request.requestedUri.queryParameters['firstName'];
   final lastName = ctx.request.requestedUri.queryParameters['lastName'];
@@ -169,7 +179,7 @@ Future<ResponseContext> signIn(final RequestContext ctx) async {
       endpoint: '${ctx.request.method.value} ${ctx.request.requestedUri.path}',
       data: {
         'authorizationCode': authorizationCode,
-        'identityToken': identityToken,
+        'identityToken': identityTokenParameter,
         'firstName': firstName,
         'lastName': lastName,
         'useBundleIdentifier': useBundleIdentifier.toString(),
@@ -177,38 +187,10 @@ Future<ResponseContext> signIn(final RequestContext ctx) async {
     ),
   );
 
-  try {
-    final verifiedIdentityToken = await siwa.verifyIdentityToken(
-      identityToken,
-      useBundleIdentifier: useBundleIdentifier,
-      nonce: null,
-    );
-
-    print('verifiedIdentityToken: $verifiedIdentityToken');
-
-    final refreshToken = await siwa.exchangeAuthorizationCode(
-      authorizationCode,
-      useBundleIdentifier: useBundleIdentifier,
-    );
-
-    print('refreshToken: $refreshToken');
-
-    refreshTokensByUserIdentifier[verifiedIdentityToken.userId] = (
-      refreshToken: refreshToken.refreshToken,
-      useBundleIdentifier: useBundleIdentifier,
-    );
-
-    return (ctx as RespondableContext).withResponse(
-      Response.ok(
-        body: Body.fromString('$verifiedIdentityToken'),
-      ),
-    );
-  } catch (e, s) {
-    print(e);
-    print(s);
-
-    rethrow;
-  }
+  refreshTokensByUserIdentifier[identityToken.userId] = (
+    refreshToken: refreshToken,
+    useBundleIdentifier: useBundleIdentifier,
+  );
 }
 
 ResponseContext revoke(final RequestContext ctx) {
@@ -388,14 +370,4 @@ class ActivityLogEntry {
   final String endpoint;
 
   final Map<String, String?> data;
-}
-
-extension on RequestContext {
-  ResponseContext withMissingQueryParameterResponse(String parameterName) {
-    return (this as RespondableContext).withResponse(
-      Response.badRequest(
-        body: Body.fromString('Missing query parameter "$parameterName".'),
-      ),
-    );
-  }
 }
