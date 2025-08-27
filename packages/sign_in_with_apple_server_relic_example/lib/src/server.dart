@@ -103,6 +103,17 @@ Future<void> serverToServerNotification(
       },
     ),
   );
+
+  final deletedUserIdentifer = switch (notification) {
+    AppleServerNotificationEmailDisabled() => null,
+    AppleServerNotificationEmailEnabled() => null,
+    AppleServerNotificationConsentRevoked() => notification.userIdentifier,
+    AppleServerNotificationAccountDelete() => notification.userIdentifier,
+  };
+
+  if (deletedUserIdentifer != null) {
+    activeUserSessions.remove(deletedUserIdentifer);
+  }
 }
 
 Future<Uri> redirectUrl(RequestContext ctx, String body) async {
