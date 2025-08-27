@@ -5,6 +5,7 @@ import 'package:relic/io_adapter.dart';
 import 'package:relic/relic.dart';
 import 'package:sign_in_with_apple_server/sign_in_with_apple_server.dart';
 import 'package:sign_in_with_apple_server_relic/sign_in_with_apple_server_relic.dart';
+import 'package:uuid/uuid.dart';
 
 late final SignInWithApple siwa;
 
@@ -12,10 +13,16 @@ late final String androidAppPackage;
 
 final activityLogEntries = <ActivityLogEntry>[];
 
-final refreshTokensByUserIdentifier =
-    <String, ({String refreshToken, bool useBundleIdentifier})>{};
+final activeUserSessions = <String, List<UserSession>>{};
 
-Future<void> main() async {
+typedef UserSession = ({
+  UuidValue id,
+  DateTime createdAt,
+  String refreshToken,
+  bool useBundleIdentifier,
+});
+
+Future<void> run() async {
   siwa = SignInWithApple(
     config: SignInWithAppleConfiguration(
       serviceIdentifier: Platform.environment['SERVICE_ID']!,
@@ -51,24 +58,29 @@ Future<void> main() async {
     ..get('/web-signin', siwaWeb)
 
     // Group of admin handlers, which a normal server would not expose
-    ..get('/admin/activity-log', activityLog)
-    ..get('/admin/sessions', sessions)
-    ..post('/admin/refresh-token', refreshToken)
-    ..post('/admin/revoke', revokeAuthorization)
+    ..get('/api/admin/activity-log', activityLog)
+    ..get('/api/admin/sessions', sessions)
+    ..post('/api/admin/refresh-token', refreshToken)
+    ..post('/api/admin/revoke', revokeAuthorization)
     ..get('/css', css)
+    ..get('/', landingPage)
     // Health check path for render.com
     ..get('/healthz', healthCheck);
 
   final handler = const Pipeline()
       .addMiddleware(logRequests())
       .addMiddleware(routeWith(router))
-      .addHandler(landingPage);
+      .addHandler(fallback404);
 
   // Start the server with the handler
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
   await serve(handler, InternetAddress.anyIPv4, port);
 
   print('Serving at http://localhost:$port');
+}
+
+ResponseContext fallback404(RequestContext ctx) {
+  return (ctx as RespondableContext).withResponse(Response.notFound());
 }
 
 // https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts
@@ -143,9 +155,17 @@ Future<Uri> redirectUrl(RequestContext ctx, String body) async {
 
   print('refreshToken: $refreshToken');
 
-  refreshTokensByUserIdentifier[verifiedIdentityToken.userId] = (
+  final session = (
+    id: const Uuid().v7obj(),
+    createdAt: DateTime.now(),
     refreshToken: refreshToken.refreshToken,
     useBundleIdentifier: false,
+  );
+
+  activeUserSessions.update(
+    verifiedIdentityToken.userId,
+    (value) => value..add(session),
+    ifAbsent: () => [session],
   );
 
   // For web debugging just end up on the sessions page
@@ -188,64 +208,71 @@ Future<void> signIn(
     ),
   );
 
-  refreshTokensByUserIdentifier[identityToken.userId] = (
+  final session = (
+    id: const Uuid().v7obj(),
+    createdAt: DateTime.now(),
     refreshToken: refreshToken,
     useBundleIdentifier: useBundleIdentifier,
   );
+
+  activeUserSessions.update(
+    identityToken.userId,
+    (value) => value..add(session),
+    ifAbsent: () => [session],
+  );
 }
 
-ResponseContext revoke(final RequestContext ctx) {
+ResponseContext revoke(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(Response.ok());
 }
 
-ResponseContext activityLog(final RequestContext ctx) {
-  return (ctx as RespondableContext).withResponse(Response.ok(
-      body: Body.fromString([
-    for (final entry in activityLogEntries.reversed) ...[
-      '-> ${entry.endpoint}',
-      '',
-      '     at ${entry.at.toIso8601String()}',
-      '',
-      for (final parameter in entry.data.entries)
-        '     ${parameter.key} = ${parameter.value}',
-      '',
-      '',
-    ]
-  ].join('\n'))));
-}
-
-ResponseContext sessions(final RequestContext ctx) {
+ResponseContext activityLog(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(
     Response.ok(
       body: Body.fromString(
         [
-          '<link rel="stylesheet" href="/css" />',
-          '<main class="container">',
-          '<h1>Active Sessions</h1>',
-          '<ul>',
-          for (final entry in refreshTokensByUserIdentifier.entries) ...[
-            '<li>'
-                '${entry.key}'
-                '<form action="/admin/refresh-token" method="post">'
-                '  <input type="hidden" name="userId" value="${entry.key}">'
-                '  <input type="submit" value="Refresh token" />'
-                '</form>'
-                '<form action="/admin/revoke" method="post">'
-                '  <input type="hidden" name="userId" value="${entry.key}">'
-                '  <input type="submit" value="Revoke authorization" />'
-                '</form>'
-                '</li>'
-          ],
-          '</ul>',
-          '</main>',
+          for (final entry in activityLogEntries.reversed) ...[
+            '-> ${entry.endpoint}',
+            '',
+            '     at ${entry.at.toIso8601String()}',
+            '',
+            for (final parameter in entry.data.entries)
+              '     ${parameter.key} = ${parameter.value}',
+            '',
+            '',
+          ]
         ].join('\n'),
-        mimeType: MimeType.html,
       ),
     ),
   );
 }
 
-Future<ResponseContext> refreshToken(final RequestContext ctx) async {
+ResponseContext sessions(RequestContext ctx) {
+  return (ctx as RespondableContext).withResponse(
+    Response.ok(
+      body: Body.fromString(
+        jsonEncode({
+          'sessionsByUserId': {
+            for (final MapEntry(key: userId, value: sessions)
+                in activeUserSessions.entries)
+              userId: [
+                for (final session in sessions)
+                  <String, dynamic>{
+                    'id': session.id.uuid,
+                    'createdAt': session.createdAt.toIso8601String(),
+                    'refreshToken': session.refreshToken,
+                    'useBundleIdentifier': session.useBundleIdentifier,
+                  },
+              ],
+          },
+        }),
+        mimeType: MimeType.json,
+      ),
+    ),
+  );
+}
+
+Future<ResponseContext> refreshToken(RequestContext ctx) async {
   try {
     final body = await utf8.decodeStream(ctx.request.body.read());
 
@@ -260,16 +287,20 @@ Future<ResponseContext> refreshToken(final RequestContext ctx) async {
       ),
     );
 
-    final formData = Uri(query: body).queryParameters;
-    final userId = formData['userId']!;
+    final sessionId = UuidValue.fromString(
+      ctx.request.requestedUri.queryParameters['sessionId']!,
+    )..validate();
+
+    final (userId, session) = activeUserSessions.entries
+        .expand((x) => x.value.map((k) => (x.key, k)))
+        .firstWhere((x) => x.$2.id == sessionId);
 
     print(userId);
-    print(refreshTokensByUserIdentifier);
+    print(activeUserSessions);
 
     final refreshToken = await siwa.validateRefreshToken(
-      refreshTokensByUserIdentifier[userId]!.refreshToken,
-      useBundleIdentifier:
-          refreshTokensByUserIdentifier[userId]!.useBundleIdentifier,
+      session.refreshToken,
+      useBundleIdentifier: session.useBundleIdentifier,
     );
 
     final verifiedIdentityToken = await siwa.verifyIdentityToken(
@@ -278,12 +309,14 @@ Future<ResponseContext> refreshToken(final RequestContext ctx) async {
       nonce: null,
     );
 
-    return (ctx as RespondableContext).withResponse(Response.ok(
+    return (ctx as RespondableContext).withResponse(
+      Response.ok(
         body: Body.fromString(
-      'Refreshed token\n'
-      ''
-      '$verifiedIdentityToken',
-    )));
+          'Refreshed token\n'
+          '$verifiedIdentityToken',
+        ),
+      ),
+    );
   } catch (e, stackTrace) {
     print(e);
     print(stackTrace);
@@ -292,7 +325,7 @@ Future<ResponseContext> refreshToken(final RequestContext ctx) async {
   }
 }
 
-Future<ResponseContext> revokeAuthorization(final RequestContext ctx) async {
+Future<ResponseContext> revokeAuthorization(RequestContext ctx) async {
   try {
     final body = await utf8.decodeStream(ctx.request.body.read());
 
@@ -307,22 +340,26 @@ Future<ResponseContext> revokeAuthorization(final RequestContext ctx) async {
       ),
     );
 
-    final formData = Uri(query: body).queryParameters;
-    final userId = formData['userId']!;
+    final sessionId = UuidValue.fromString(
+      ctx.request.requestedUri.queryParameters['sessionId']!,
+    )..validate();
 
-    print(userId);
-    print(refreshTokensByUserIdentifier);
+    print(sessionId);
+    print(activeUserSessions);
+
+    final (userId, session) = activeUserSessions.entries
+        .expand((x) => x.value.map((k) => (x.key, k)))
+        .firstWhere((x) => x.$2.id == sessionId);
 
     await siwa.revokeAuthorization(
-      refreshToken: refreshTokensByUserIdentifier[userId]!.refreshToken,
-      useBundleIdentifier:
-          refreshTokensByUserIdentifier[userId]!.useBundleIdentifier,
+      refreshToken: session.refreshToken,
+      useBundleIdentifier: session.useBundleIdentifier,
     );
 
-    refreshTokensByUserIdentifier.remove(userId);
+    activeUserSessions.update(userId, (x) => x..remove(session));
 
     return (ctx as RespondableContext).withResponse(
-      Response.found(Uri.parse('/admin/sessions')),
+      Response.ok(),
     );
   } catch (e, stackTrace) {
     print(e);
@@ -332,11 +369,11 @@ Future<ResponseContext> revokeAuthorization(final RequestContext ctx) async {
   }
 }
 
-ResponseContext healthCheck(final RequestContext ctx) {
+ResponseContext healthCheck(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(Response.ok());
 }
 
-ResponseContext css(final RequestContext ctx) {
+ResponseContext css(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(
     Response.ok(
       body: Body.fromString(
@@ -347,7 +384,7 @@ ResponseContext css(final RequestContext ctx) {
   );
 }
 
-ResponseContext landingPage(final RequestContext ctx) {
+ResponseContext landingPage(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(
     Response.ok(
       body: Body.fromString(
@@ -358,7 +395,7 @@ ResponseContext landingPage(final RequestContext ctx) {
   );
 }
 
-ResponseContext siwaWeb(final RequestContext ctx) {
+ResponseContext siwaWeb(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(
     Response.ok(
       body: Body.fromString(

@@ -2,17 +2,17 @@ FROM dart:3.6.1 AS build
 
 WORKDIR /app
 COPY . .
-WORKDIR /app/packages/sign_in_with_apple_server_relic/example
+WORKDIR /app/packages/sign_in_with_apple_server_relic_example
 
 RUN dart pub get
-RUN dart compile exe example.dart -o server
+RUN dart compile exe bin/example.dart -o server
 
 # Build minimal serving image from AOT-compiled `/server` and required system
 # libraries and configuration files stored in `/runtime/` from the build stage.
 FROM scratch
 COPY --from=build /runtime/ /
-COPY --from=build /app/packages/sign_in_with_apple_server_relic/example/server /app/bin/
-COPY --from=build /app/packages/sign_in_with_apple_server_relic/example/assets /app/bin/assets/
+COPY --from=build /app/packages/sign_in_with_apple_server_relic_example/server /app/bin/
+COPY --from=build /app/packages/sign_in_with_apple_server_relic_example/assets /app/bin/assets/
 
 # Start server.
 EXPOSE 10000
