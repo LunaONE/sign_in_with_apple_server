@@ -54,9 +54,6 @@ Future<void> run() async {
     // Optional endpoint (to showcase using Apple's API with the refresh token on demand)
     ..post('/api/revoke', revoke)
 
-    // SiwA web-page login
-    ..get('/web-signin', siwaWeb)
-
     // Group of admin handlers, which a normal server would not expose
     ..get('/api/admin/activity-log', activityLog)
     ..get('/api/admin/sessions', sessions)
@@ -169,8 +166,8 @@ Future<Uri> redirectUrl(RequestContext ctx, String body) async {
     ifAbsent: () => [session],
   );
 
-  // For web debugging just end up on the sessions page
-  return Uri.parse('https://sign-in-with-apple.lunaone.de/admin/sessions');
+  // Non-pop-up web sign-ins just go back to the homepage
+  return Uri.https('sign-in-with-apple.lunaone.de');
 }
 
 Future<void> signIn(
@@ -389,18 +386,7 @@ ResponseContext landingPage(RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(
     Response.ok(
       body: Body.fromString(
-        File('./assets/index.html').readAsStringSync(),
-        mimeType: MimeType.html,
-      ),
-    ),
-  );
-}
-
-ResponseContext siwaWeb(RequestContext ctx) {
-  return (ctx as RespondableContext).withResponse(
-    Response.ok(
-      body: Body.fromString(
-        File('./assets/siwa_web.html')
+        File('./assets/index.html')
             .readAsStringSync()
             .replaceFirst('[CLIENT_ID]', Platform.environment['SERVICE_ID']!)
             .replaceFirst(
