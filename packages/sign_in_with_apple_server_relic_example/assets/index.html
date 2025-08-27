@@ -1,0 +1,140 @@
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>sign_in_with_apple_server Demo</title>
+
+    <link rel="stylesheet" href="/css" />
+  </head>
+
+  <body>
+    <main class="container">
+      <h1><i>Sign in with Apple</i> server demo</h1>
+
+      <p>
+        A demo server for the <code>sign_in_with_apple_server</code> Dart
+        package.<br />
+        Get the
+        <a href="https://pub.dev/packages/sign_in_with_apple_server"
+          >package on pub.dev</a
+        >
+        or the
+        <a href="https://github.com/LunaONE/sign_in_with_apple_server"
+          >source code on GitHub</a
+        >.
+      </p>
+
+      <section>
+        <h2>Try the sign-in</h2>
+
+        <article class="component">
+          Sign in with Apple <a href="/web-signin">here</a>.
+        </article>
+      </section>
+
+      <section>
+        <h2>Debugging functionality</h2>
+
+        <article class="component">
+          <button id="viewActivityLog" class="outline">
+            View activity log
+          </button>
+          <button id="listSessions" class="outline">List sessions</button>
+
+          <div id="adminContent"></div>
+        </article>
+      </section>
+
+      <hr />
+
+      <p>Built by <a href="https://www.lunaone.de/flutter">LunaONE GmbH</a>.</p>
+
+      <script>
+        document
+          .getElementById("listSessions")
+          .addEventListener("click", async () => {
+            document.getElementById("adminContent").innerHTML =
+              '<span aria-busy="true">Fetching sessions...</span>';
+
+            const response = await fetch(`/api/admin/sessions`, {
+              method: "GET",
+            });
+            const responseBody = await response.json();
+
+            document.getElementById("adminContent").innerHTML = `
+          <div class="overflow-auto">
+            <table class="striped" style="white-space: nowrap;">
+              <thead>
+                <tr>
+                  <th scope="col">User ID</th>
+                  <th scope="col">Created at</th>
+                  <th scope="col">Refresh token</th>
+                  <th scope="col"><code>useBundleIdentifier</code></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${Array.from(
+                  new Map(Object.entries(responseBody["sessionsByUserId"]))
+                    .entries()
+                    .map(([userId, sessions]) =>
+                      sessions
+                        .map(
+                          (session) => `
+                <tr>
+                  <th scope="row">${userId}</td>
+                  <td>${session["createdAt"]}</td>
+                  <td>
+                      ${session["refreshToken"]}
+                      <a onClick="refresh('${session["id"]}')">Refresh</a>
+                      <a onClick="revoke('${session["id"]}')">Revoke</a>
+                  </td>
+                  <td>${session["useBundleIdentifier"]}</td>
+                </tr>`
+                        )
+                        .join("")
+                    )
+                ).join(" ")} 
+              </tbody>
+            </table>
+          </div>
+          `;
+          });
+      </script>
+
+      <script>
+        document
+          .getElementById("viewActivityLog")
+          .addEventListener("click", async () => {
+            document.getElementById("adminContent").innerHTML =
+              '<span aria-busy="true">Fetching logs...</span>';
+
+            const response = await fetch(`/api/admin/activity-log`, {
+              method: "GET",
+            });
+            const responseBody = await response.text();
+
+            document.getElementById("adminContent").innerHTML = `
+            <p>
+              <pre>${responseBody.trim()}</pre>
+            </p>
+          `;
+          });
+
+        async function refresh(sessionId) {
+          const params = new URLSearchParams();
+          params.append("sessionId", sessionId);
+          await fetch(`/api/admin/refresh-token?${params}`, {
+            method: "POST",
+          });
+        }
+
+        async function revoke(sessionId) {
+          const params = new URLSearchParams();
+          params.append("sessionId", sessionId);
+          await fetch(`/api/admin/revoke?${params}`, {
+            method: "POST",
+          });
+        }
+      </script>
+    </main>
+  </body>
+</html>
