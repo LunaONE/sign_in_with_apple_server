@@ -55,7 +55,7 @@ Future<void> main() async {
     ..get('/admin/sessions', sessions)
     ..post('/admin/refresh-token', refreshToken)
     ..post('/admin/revoke', revokeAuthorization)
-
+    ..get('/css', css)
     // Health check path for render.com
     ..get('/healthz', healthCheck);
 
@@ -148,7 +148,8 @@ Future<Uri> redirectUrl(RequestContext ctx, String body) async {
     useBundleIdentifier: false,
   );
 
-  throw UnimplementedError();
+  // For web debugging just end up on the sessions page
+  return Uri.parse('https://sign-in-with-apple.lunaone.de/admin/sessions');
 }
 
 Future<void> signIn(
@@ -218,6 +219,8 @@ ResponseContext sessions(final RequestContext ctx) {
     Response.ok(
       body: Body.fromString(
         [
+          '<link rel="stylesheet" href="/css" />',
+          '<main class="container">',
           '<h1>Active Sessions</h1>',
           '<ul>',
           for (final entry in refreshTokensByUserIdentifier.entries) ...[
@@ -233,7 +236,8 @@ ResponseContext sessions(final RequestContext ctx) {
                 '</form>'
                 '</li>'
           ],
-          '</ul>'
+          '</ul>',
+          '</main>',
         ].join('\n'),
         mimeType: MimeType.html,
       ),
@@ -330,6 +334,17 @@ Future<ResponseContext> revokeAuthorization(final RequestContext ctx) async {
 
 ResponseContext healthCheck(final RequestContext ctx) {
   return (ctx as RespondableContext).withResponse(Response.ok());
+}
+
+ResponseContext css(final RequestContext ctx) {
+  return (ctx as RespondableContext).withResponse(
+    Response.ok(
+      body: Body.fromString(
+        File('./assets/pico.min.css').readAsStringSync(),
+        mimeType: MimeType.css,
+      ),
+    ),
+  );
 }
 
 ResponseContext landingPage(final RequestContext ctx) {
