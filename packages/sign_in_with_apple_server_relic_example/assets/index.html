@@ -27,7 +27,20 @@
         <h2>Try the sign-in</h2>
 
         <article class="component">
-          Sign in with Apple <a href="/web-signin">here</a>.
+          <div>
+            <fieldset>
+              <input
+                role="switch"
+                type="checkbox"
+                id="popup"
+                name="popup"
+                checked
+              />
+              <label for="popup">Use pop-up</label>
+            </fieldset>
+          </div>
+
+          <button id="btn"> Sign in with Apple</button>
         </article>
       </section>
 
@@ -47,6 +60,64 @@
       <hr />
 
       <p>Built by <a href="https://www.lunaone.de/flutter">LunaONE GmbH</a>.</p>
+
+      <script
+        type="text/javascript"
+        src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"
+      ></script>
+      <script type="text/javascript">
+        AppleID.auth.init({
+          clientId: "[CLIENT_ID]",
+          scope: "email name",
+          redirectURI: "[REDIRECT_URI]",
+          state: null,
+          nonce: null,
+        });
+      </script>
+
+      <script>
+        document.getElementById("btn").addEventListener("click", async () => {
+          try {
+            const result = await AppleID.auth.signIn({
+              usePopup: document.getElementById("popup").checked,
+            });
+
+            // {
+            //      "authorization": {
+            //        "code": "[CODE]",
+            //        "id_token": "[ID_TOKEN]",
+            //        "state": "[STATE]"
+            //      },
+            //     // First time / initial registration only
+            //      "user": {
+            //        "email": "[EMAIL]",
+            //        "name": {
+            //          "firstName": "[FIRST_NAME]",
+            //          "lastName": "[LAST_NAME]"
+            //        }
+            //      }
+            // }
+            console.log(result);
+
+            const params = new URLSearchParams();
+
+            params.append("useBundleIdentifier", "false");
+            params.append("authorizationCode", result.authorization.code);
+            params.append("identityToken", result.authorization.id_token);
+
+            if (result.user && result.user.name) {
+              params.append("firstName", result.user.name.firstName);
+              params.append("lastName", result.user.name.lastName);
+            }
+
+            await fetch(`/api/sign-in?${params}`, {
+              method: "POST",
+            });
+          } catch (e) {
+            console.error(e);
+          }
+        });
+      </script>
 
       <script>
         document
