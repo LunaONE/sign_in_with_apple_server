@@ -19,7 +19,8 @@ jobs:
         sdk: [3.5.0, stable]
         package: [
           ./packages/sign_in_with_apple_server,
-          ./packages/sign_in_with_apple_server_relic
+          ./packages/sign_in_with_apple_server_relic,
+          ./packages/sign_in_with_apple_server_relic_example,
         ]
     defaults:
       run:

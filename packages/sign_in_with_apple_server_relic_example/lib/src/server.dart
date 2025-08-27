@@ -240,7 +240,7 @@ ResponseContext activityLog(RequestContext ctx) {
               '     ${parameter.key} = ${parameter.value}',
             '',
             '',
-          ]
+          ],
         ].join('\n'),
       ),
     ),
@@ -403,7 +403,9 @@ ResponseContext siwaWeb(RequestContext ctx) {
             .readAsStringSync()
             .replaceFirst('[CLIENT_ID]', Platform.environment['SERVICE_ID']!)
             .replaceFirst(
-                '[REDIRECT_URI]', Platform.environment['REDIRECT_URI']!),
+              '[REDIRECT_URI]',
+              Platform.environment['REDIRECT_URI']!,
+            ),
         mimeType: MimeType.html,
       ),
     ),
@@ -412,9 +414,9 @@ ResponseContext siwaWeb(RequestContext ctx) {
 
 class ActivityLogEntry {
   ActivityLogEntry({
-    DateTime? at,
     required this.endpoint,
     required this.data,
+    DateTime? at,
   }) : at = at ?? DateTime.now();
 
   final DateTime at;
