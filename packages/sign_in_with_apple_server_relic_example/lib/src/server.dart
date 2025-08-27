@@ -88,23 +88,24 @@ Future<void> serverToServerNotification(
   RequestContext ctx,
   AppleServerNotification notification,
 ) async {
-  final body = await utf8.decodeStream(ctx.request.body.read());
-
-  print('body: $body');
-
   activityLogEntries.add(
     ActivityLogEntry(
       endpoint: '${ctx.request.method.value} ${ctx.request.requestedUri.path}',
       data: {
-        'body': body,
+        'body': switch (notification) {
+          AppleServerNotificationEmailDisabled() =>
+            'AppleServerNotificationEmailDisabled(userIdentifier: ${notification.userIdentifier}, email: ${notification.email})',
+          AppleServerNotificationEmailEnabled() =>
+            'AppleServerNotificationEmailEnabled(userIdentifier: ${notification.userIdentifier}, email: ${notification.email})',
+          AppleServerNotificationConsentRevoked() =>
+            'AppleServerNotificationConsentRevoked(userIdentifier: ${notification.userIdentifier})',
+          AppleServerNotificationAccountDelete() =>
+            'AppleServerNotificationAccountDelete(userIdentifier: ${notification.userIdentifier})',
+        },
         'query': ctx.request.requestedUri.query,
       },
     ),
   );
-
-  final payload = (jsonDecode(body) as Map)['payload'] as String;
-
-  print(await siwa.decodeAppleServerNotification(payload));
 }
 
 Future<Uri> redirectUrl(RequestContext ctx, String body) async {
