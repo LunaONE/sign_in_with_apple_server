@@ -134,7 +134,8 @@ Future<Uri> redirectUrl(RequestContext ctx, String body) async {
 
   final userAgent = ctx.request.headers.userAgent;
   // Alternatively use the `state` to detect target action (so this would not be triggered in browsers on Android)
-  if (userAgent != null && userAgent.contains('Android')) {
+  if (userAgent != null &&
+      (userAgent.contains('Android') || userAgent.contains('Linux'))) {
     // Important to always forward, even on error (contained in the `body` parameters), so the in-app browser closes in the app
     final appDeeplink = Uri(
       scheme: 'intent',
